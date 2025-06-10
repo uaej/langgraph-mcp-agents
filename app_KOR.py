@@ -211,19 +211,13 @@ if "thread_id" not in st.session_state:
 async def cleanup_mcp_client():
     """
     기존 MCP 클라이언트를 안전하게 종료합니다.
-
-    기존 클라이언트가 있는 경우 정상적으로 리소스를 해제합니다.
     """
     if "mcp_client" in st.session_state and st.session_state.mcp_client is not None:
         try:
-
-            await st.session_state.mcp_client.__aexit__(None, None, None)
+            # 새로운 방식에서는 명시적인 종료가 필요 없음
             st.session_state.mcp_client = None
         except Exception as e:
-            import traceback
-
-            # st.warning(f"MCP 클라이언트 종료 중 오류: {str(e)}")
-            # st.warning(traceback.format_exc())
+            pass
 
 
 def print_message():
@@ -422,54 +416,54 @@ async def process_query(query, text_placeholder, tool_placeholder, timeout_secon
 async def initialize_session(mcp_config=None):
     """
     MCP 세션과 에이전트를 초기화합니다.
-
-    매개변수:
-        mcp_config: MCP 도구 설정 정보(JSON). None인 경우 기본 설정 사용
-
-    반환값:
-        bool: 초기화 성공 여부
     """
     with st.spinner("🔄 MCP 서버에 연결 중..."):
-        # 먼저 기존 클라이언트를 안전하게 정리
+        # 기존 클라이언트 정리
         await cleanup_mcp_client()
 
         if mcp_config is None:
-            # config.json 파일에서 설정 로드
             mcp_config = load_config_from_json()
-        client = MultiServerMCPClient(mcp_config)
-        await client.__aenter__()
-        tools = client.get_tools()
-        st.session_state.tool_count = len(tools)
-        st.session_state.mcp_client = client
 
-        # 선택된 모델에 따라 적절한 모델 초기화
-        selected_model = st.session_state.selected_model
+        try:
+            # 새로운 방식으로 MultiServerMCPClient 사용
+            client = MultiServerMCPClient(mcp_config)
+            tools = await client.get_tools()  # 직접 tools 가져오기
+            
+            st.session_state.tool_count = len(tools)
+            st.session_state.mcp_client = client
 
-        if selected_model in [
-            "claude-3-7-sonnet-latest",
-            "claude-3-5-sonnet-latest",
-            "claude-3-5-haiku-latest",
-        ]:
-            model = ChatAnthropic(
-                model=selected_model,
-                temperature=0.1,
-                max_tokens=OUTPUT_TOKEN_INFO[selected_model]["max_tokens"],
+            # 선택된 모델에 따라 적절한 모델 초기화
+            selected_model = st.session_state.selected_model
+
+            if selected_model in [
+                "claude-3-7-sonnet-latest",
+                "claude-3-5-sonnet-latest",
+                "claude-3-5-haiku-latest",
+            ]:
+                model = ChatAnthropic(
+                    model=selected_model,
+                    temperature=0.1,
+                    max_tokens=OUTPUT_TOKEN_INFO[selected_model]["max_tokens"],
+                )
+            else:  # OpenAI 모델 사용
+                model = ChatOpenAI(
+                    model=selected_model,
+                    temperature=0.1,
+                    max_tokens=OUTPUT_TOKEN_INFO[selected_model]["max_tokens"],
+                )
+            agent = create_react_agent(
+                model,
+                tools,
+                checkpointer=MemorySaver(),
+                prompt=SYSTEM_PROMPT,
             )
-        else:  # OpenAI 모델 사용
-            model = ChatOpenAI(
-                model=selected_model,
-                temperature=0.1,
-                max_tokens=OUTPUT_TOKEN_INFO[selected_model]["max_tokens"],
-            )
-        agent = create_react_agent(
-            model,
-            tools,
-            checkpointer=MemorySaver(),
-            prompt=SYSTEM_PROMPT,
-        )
-        st.session_state.agent = agent
-        st.session_state.session_initialized = True
-        return True
+            st.session_state.agent = agent
+            st.session_state.session_initialized = True
+            return True
+
+        except Exception as e:
+            st.error(f"MCP 클라이언트 초기화 중 오류 발생: {str(e)}")
+            return False
 
 
 # --- 사이드바: 시스템 설정 섹션 ---
